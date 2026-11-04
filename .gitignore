@@ -1,0 +1,8 @@
+# Verificar segurança: cópias dos relatórios (têm dados do PC)
+seguranca/relatorios/
+
+# Recuperar Redmi: ambiente Python, ROMs (5 GB cada) e registro da última instalação
+recuperar-redmi/.venv/
+recuperar-redmi/rom/
+recuperar-redmi/instalacao.log
+__pycache__/

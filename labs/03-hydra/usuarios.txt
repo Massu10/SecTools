@@ -1,0 +1,7 @@
+treino
+admin
+root
+kali
+user
+msfadmin
+teste

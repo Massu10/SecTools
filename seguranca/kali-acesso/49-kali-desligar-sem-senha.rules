@@ -1,0 +1,16 @@
+// Kali na janela do Hyper-V (sessão aprimorada/xrdp conta como sessão remota, e aí o Linux pedia senha para desligar).
+// Deixa SÓ o usuário kali desligar e reiniciar sem senha. sudo, root e o resto continuam pedindo senha.
+// Instalado pelo aplicar-sair-facil.sh (que troca "kali" pelo usuário escolhido). Desfazer: apagar este arquivo.
+polkit.addRule(function (action, subject) {
+    var acoes = [
+        "org.freedesktop.login1.power-off",
+        "org.freedesktop.login1.power-off-multiple-sessions",
+        "org.freedesktop.login1.power-off-ignore-inhibit",
+        "org.freedesktop.login1.reboot",
+        "org.freedesktop.login1.reboot-multiple-sessions",
+        "org.freedesktop.login1.reboot-ignore-inhibit"
+    ];
+    if (subject.user === "kali" && acoes.indexOf(action.id) >= 0) {
+        return polkit.Result.YES;
+    }
+});

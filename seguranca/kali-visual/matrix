@@ -1,0 +1,858 @@
+#!/usr/bin/env python3
+"""matrix: chuva de código no terminal (tema Máscara verde).
+
+  matrix                descanso de tela. Sair: q, Esc ou Ctrl+C.  Mais rápido: +   Mais devagar: -
+  comando | matrix      o resultado do comando cai na chuva e cada letra para no lugar certo
+  matrix < arquivo      o mesmo, com um arquivo
+  matrix --capturar B   usado pela chuva automática do mascara.zsh: cria um terminal falso para o comando
+                        escrever (ele continua achando que está num terminal: mesmas cores e colunas), mostra a
+                        linha de espera e grava tudo em B.saida quando o zsh cria B.fim
+
+Chuva do resultado: qualquer tecla pula para o fim. Quanto maior o resultado, mais rápido a chuva cai
+(cerca de 1 s numa linha e 2,4 s numa tela cheia). MATRIX_TEMPO=2 deixa 2x mais lento; 0.5, 2x mais rápido.
+Resultado maior que a tela: o começo sai direto e só a última tela cai na chuva.
+Saída que não é o terminal (matrix > arquivo, | grep ...): o texto passa direto, sem efeito.
+Cores: verdes no tema Máscara; azuis do Kali quando existe ~/.mascara-cores-originais (comando: cores original).
+"""
+import math
+import os
+import random
+import re
+import select
+import signal
+import sys
+import time
+import unicodedata
+
+SIMBOLOS = '0123456789ABCDEFabcdef@#$%&*+=-<>/\\|:;{}[]?!~^'
+
+
+def cores_da_chuva():
+    """(cabeça, vivo, meio, fim, texto) em 256 cores e em 8 cores: verdes, ou azuis do Kali no modo original."""
+    if os.path.exists(os.path.expanduser('~/.mascara-cores-originais')):
+        return (231, 39, 32, 24, 75), (7, 4, 4, 4, 4)
+    return (194, 46, 34, 22, 71), (7, 2, 2, 2, 2)
+
+
+# ---------------------------------------------------------------- descanso de tela (matrix sem nada na entrada)
+
+def principal(tela):
+    curses.curs_set(0)
+    try:
+        curses.use_default_colors()
+        fundo = -1
+    except curses.error:
+        fundo = curses.COLOR_BLACK
+    muitas = curses.COLORS >= 256
+    c256, c8 = cores_da_chuva()
+    for i in range(4):
+        curses.init_pair(i + 1, c256[i] if muitas else c8[i], fundo)
+    cabeca = curses.color_pair(1) | curses.A_BOLD
+    vivo = curses.color_pair(2) | curses.A_BOLD
+    meio = curses.color_pair(3)
+    fim = curses.color_pair(4) | (0 if muitas else curses.A_DIM)
+    tela.nodelay(True)
+    atraso = 0.045
+
+    def nova(alt, inicio=False):
+        return {'y': random.randint(-alt, 0) if inicio else random.randint(-alt // 2, 0),
+                'L': random.randint(6, max(8, alt)), 'v': random.choice((1, 1, 2)), 't': 0}
+
+    def comecar():
+        alt, larg = tela.getmaxyx()
+        tela.erase()
+        return alt, larg, {x: nova(alt, True) for x in range(0, larg, 2)}, [[' '] * larg for _ in range(alt)]
+
+    def pos(y, x, c, a):
+        try:
+            tela.addstr(y, x, c, a)
+        except curses.error:
+            pass
+
+    alt, larg, gotas, buf = comecar()
+    while True:
+        tecla = tela.getch()
+        if tecla in (ord('q'), ord('Q'), 27):
+            break
+        if tecla == curses.KEY_RESIZE:
+            alt, larg, gotas, buf = comecar()
+            continue
+        if tecla == ord('+'):
+            atraso = max(0.01, atraso - 0.01)
+        elif tecla == ord('-'):
+            atraso = min(0.2, atraso + 0.01)
+        for x, g in gotas.items():
+            g['t'] += 1
+            if g['t'] % g['v']:
+                continue
+            y, L = g['y'], g['L']
+            if 0 <= y - 1 < alt:
+                pos(y - 1, x, buf[y - 1][x], vivo)
+            if 0 <= y < alt:
+                buf[y][x] = random.choice(SIMBOLOS)
+                pos(y, x, buf[y][x], cabeca)
+            for k, a in ((L // 2, meio), (L - 2, fim)):
+                if 0 <= y - k < alt:
+                    pos(y - k, x, buf[y - k][x], a)
+            if 0 <= y - L < alt:
+                buf[y - L][x] = ' '
+                pos(y - L, x, ' ', 0)
+            g['y'] += 1
+            if y - L >= alt:
+                gotas[x] = nova(alt)
+        for _ in range(max(1, larg // 20)):
+            yy, xx = random.randrange(alt), random.randrange(0, larg, 2)
+            if buf[yy][xx] != ' ':
+                buf[yy][xx] = random.choice(SIMBOLOS)
+                pos(yy, xx, buf[yy][xx], meio)
+        tela.refresh()
+        time.sleep(atraso)
+
+
+# ---------------------------------------------------------------- texto do resultado -> células da tela
+
+CSI = re.compile(r'\x1b\[([0-?]*)([ -/]*)([@-~])')
+OSC = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?')
+CORDA = re.compile(r'\x1b[P_^X][^\x1b]*(?:\x1b\\)?')      # DCS, APC, PM e SOS (imagens sixel etc.)
+ESC2 = re.compile(r'\x1b[ -/]*[0-~]?')
+CONT = object()                                            # 2ª metade de um caractere largo
+SEM_ESTILO = (False,) * 8 + (None, None)                   # negrito, fraco, itálico, sublinhado, piscar, inverso, oculto, riscado, frente, fundo
+TELA_ALTERNATIVA = {'1049', '1047', '47'}
+_sgr_cache = {}
+
+
+def largura(ch):
+    o = ord(ch)
+    if o < 0x300:
+        return 1
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ('Mn', 'Me', 'Cf'):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+
+
+def numero(texto, padrao):
+    return int(texto) if texto.isdigit() else padrao
+
+
+def aplica_sgr(est, params):
+    a = list(est)
+    p = params.split(';')
+    i = 0
+    while i < len(p):
+        x = p[i]
+        i += 1
+        if ':' in x:                                       # 38:5:n, 38:2::r:g:b, 4:3
+            sub = x.split(':')
+            if sub[0] in ('38', '48') and len(sub) >= 3 and all(s.isdigit() for s in sub[2:] if s):
+                if sub[1] == '5':
+                    a[8 if sub[0] == '38' else 9] = sub[0] + ';5;' + sub[2]
+                elif sub[1] == '2' and len(sub) >= 5:
+                    a[8 if sub[0] == '38' else 9] = sub[0] + ';2;' + ';'.join(sub[-3:])
+            elif sub[0] == '4':
+                a[3] = sub[1:2] != ['0']
+            continue
+        n = numero(x, 0)
+        if n == 0:
+            a = list(SEM_ESTILO)
+        elif 1 <= n <= 9 and n != 6:
+            a[{1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 7: 5, 8: 6, 9: 7}[n]] = True
+        elif n == 6:
+            a[4] = True
+        elif n == 21:
+            a[3] = True
+        elif n == 22:
+            a[0] = a[1] = False
+        elif 23 <= n <= 29 and n != 26:
+            a[{23: 2, 24: 3, 25: 4, 27: 5, 28: 6, 29: 7}[n]] = False
+        elif 30 <= n <= 37 or 90 <= n <= 97:
+            a[8] = str(n)
+        elif n == 39:
+            a[8] = None
+        elif 40 <= n <= 47 or 100 <= n <= 107:
+            a[9] = str(n)
+        elif n == 49:
+            a[9] = None
+        elif n in (38, 48):
+            k = 8 if n == 38 else 9
+            if i + 1 < len(p) and p[i] == '5' and p[i + 1].isdigit():
+                a[k] = '%d;5;%s' % (n, p[i + 1])
+                i += 2
+            elif i + 3 < len(p) and p[i] == '2' and all(s.isdigit() for s in p[i + 1:i + 4]):
+                a[k] = '%d;2;%s' % (n, ';'.join(p[i + 1:i + 4]))
+                i += 4
+            else:
+                break
+    return tuple(a)
+
+
+def sgr_de(est):
+    if est == SEM_ESTILO:
+        return ''
+    s = _sgr_cache.get(est)
+    if s is None:
+        partes = ['0'] + [c for c, ligado in zip('12345789', est[:8]) if ligado] + [c for c in est[8:] if c]
+        s = _sgr_cache[est] = '\x1b[' + ';'.join(partes) + 'm'
+    return s
+
+
+def poe(linha, col, celula, w):
+    while len(linha) < col + w:
+        linha.append(None)
+    if linha[col] is CONT and col > 0:
+        linha[col - 1] = None
+    linha[col] = celula
+    if w == 2:
+        if col + 2 < len(linha) and linha[col + 2] is CONT:
+            linha[col + 2] = None
+        linha[col + 1] = CONT
+    elif col + 1 < len(linha) and linha[col + 1] is CONT:
+        linha[col + 1] = None
+
+
+def tem_algo(linha):
+    return any(c is not None for c in linha)
+
+
+def montar(texto, larg, alt=10 ** 6):
+    """Linhas como o terminal mostraria: lista de [None | CONT | (caractere, estilo, largura)].
+    Entende cores, \\r, \\b, tabulação, apagar linha e tela, mover o cursor e a tela alternativa (que é descartada).
+    Devolve (linhas, coluna onde o cursor parou na última linha, ou None se o texto terminou numa linha nova)."""
+    linhas, y, col, est = [[]], 0, 0, SEM_ESTILO
+    salvo, alternativa = (0, 0), None
+    i, n = 0, len(texto)
+
+    def topo():                                           # 1ª linha da tela (as de cima já rolaram)
+        return max(0, len(linhas) - alt)
+
+    def ate(r):
+        while len(linhas) <= r:
+            linhas.append([])
+        return r
+
+    while i < n:
+        ch = texto[i]
+        if ch == '\x1b':
+            m = CSI.match(texto, i)
+            if m:
+                i = m.end()
+                par, meio, fim = m.groups()
+                if meio or par[:1] in ('<', '=', '>'):
+                    continue
+                if par[:1] == '?':
+                    if fim in 'hl' and TELA_ALTERNATIVA & set(par[1:].split(';')):
+                        if fim == 'h' and alternativa is None:
+                            alternativa, linhas, y, col = (linhas, y, col), [[]], 0, 0
+                        elif fim == 'l' and alternativa is not None:
+                            (linhas, y, col), alternativa = alternativa, None
+                    continue
+                if fim == 'm':
+                    est = aplica_sgr(est, par)
+                    continue
+                ps = [numero(x, 0) for x in par.split(';')]
+                p = max(1, ps[0])
+                if fim == 'A':
+                    y = max(topo(), y - p)
+                elif fim in 'Be':
+                    y = ate(min(y + p, topo() + alt - 1))
+                elif fim in 'Ca':
+                    col = min(larg - 1, col + p)
+                elif fim == 'D':
+                    col = max(0, min(col, larg - 1) - p)
+                elif fim == 'E':
+                    y, col = ate(min(y + p, topo() + alt - 1)), 0
+                elif fim == 'F':
+                    y, col = max(topo(), y - p), 0
+                elif fim in 'G`':
+                    col = min(larg - 1, p - 1)
+                elif fim in 'Hf':
+                    c = max(1, ps[1]) if len(ps) > 1 else 1
+                    y, col = ate(topo() + min(p, alt) - 1), min(larg - 1, c - 1)
+                elif fim == 'd':
+                    y = ate(topo() + min(p, alt) - 1)
+                elif fim == 'J':
+                    if ps[0] == 0:
+                        del linhas[y][col:]
+                        del linhas[y + 1:]
+                    elif ps[0] == 1:
+                        for r in range(topo(), y):
+                            linhas[r] = []
+                        for k in range(min(col + 1, len(linhas[y]))):
+                            linhas[y][k] = None
+                    else:                                 # tela limpa: vale o que vier depois
+                        linhas, y = [[]], 0
+                elif fim == 'K':
+                    if ps[0] == 0:
+                        del linhas[y][col:]
+                    elif ps[0] == 1:
+                        for k in range(min(col + 1, len(linhas[y]))):
+                            linhas[y][k] = None
+                    else:
+                        linhas[y] = []
+                elif fim == 's' and not par:
+                    salvo = (y, col)
+                elif fim == 'u' and not par:
+                    y, col = min(salvo[0], len(linhas) - 1), salvo[1]
+                continue
+            m = OSC.match(texto, i) or CORDA.match(texto, i)
+            if m:
+                i = m.end()
+                continue
+            m = ESC2.match(texto, i)
+            i = m.end()
+            cod = m.group()[1:]
+            if cod == '7':
+                salvo = (y, col)
+            elif cod == '8':
+                y, col = min(salvo[0], len(linhas) - 1), salvo[1]
+            elif cod == 'D':
+                y = ate(y + 1)
+            elif cod == 'E':
+                y, col = ate(y + 1), 0
+            elif cod == 'M':
+                y = max(topo(), y - 1)
+            elif cod == 'c':
+                linhas, y, col, est = [[]], 0, 0, SEM_ESTILO
+            continue
+        i += 1
+        if ch == '\n':
+            y, col = ate(y + 1), 0
+        elif ch == '\r':
+            col = 0
+        elif ch == '\t':
+            col = max(col, min((col // 8 + 1) * 8, larg - 1))
+        elif ch == '\b':
+            col = max(0, min(col, larg) - 1)
+        elif ch < ' ' or '\x7f' <= ch <= '\x9f':
+            continue
+        else:
+            w = largura(ch)
+            if w == 0 or w > larg:
+                continue
+            if col + w > larg:                            # quebra automática
+                y, col = ate(y + 1), 0
+            # espaço sem fundo, inverso, sublinhado nem riscado não aparece: fica vazio
+            vazio = ch == ' ' and est[9] is None and not (est[3] or est[5] or est[7])
+            poe(linhas[y], col, None if vazio else (ch, sgr_de(est), w), w)
+            col += w
+    if alternativa is not None:                           # terminou na tela alternativa: vale a normal
+        linhas, y, col = alternativa
+    while len(linhas) > y + 1 and not tem_algo(linhas[-1]):
+        linhas.pop()
+    if y < len(linhas) - 1:
+        return linhas, None
+    if not tem_algo(linhas[-1]):                          # o cursor parou numa linha nova e vazia
+        linhas.pop()
+        return linhas, None
+    return linhas, col
+
+
+def linha_pronta(linha):
+    """A linha já no lugar, com as cores do comando (para escrever direto)."""
+    s, atual = [], ''
+    for c in linha:
+        if c is CONT:
+            continue
+        ch, sg = (' ', '') if c is None else c[:2]
+        if sg != atual:
+            s.append(sg or '\x1b[0m')
+            atual = sg
+        s.append(ch)
+    if atual:
+        s.append('\x1b[0m')
+    return ''.join(s)
+
+
+# ---------------------------------------------------------------- chuva do resultado (comando | matrix)
+
+class Saida:
+    def __init__(self, fd):
+        self.fd = fd
+
+    def bytes(self, dados):
+        v = memoryview(dados)
+        while v:
+            v = v[os.write(self.fd, v):]
+
+    def texto(self, s):
+        self.bytes(s.encode('utf-8', 'replace'))
+
+
+class Teclado:
+    """Qualquer tecla pula a chuva. Lê do /dev/tty, porque a entrada é o resultado do comando."""
+
+    def __init__(self):
+        self.fd = self.antes = None
+        try:
+            import termios
+            self.termios = termios
+            self.fd = os.open('/dev/tty', os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY)
+            self.antes = termios.tcgetattr(self.fd)
+            novo = termios.tcgetattr(self.fd)
+            novo[3] &= ~(termios.ICANON | termios.ECHO)
+            novo[6][termios.VMIN], novo[6][termios.VTIME] = 0, 0
+            termios.tcsetattr(self.fd, termios.TCSANOW, novo)
+        except Exception:
+            self.fecha()
+
+    def linha_do_cursor(self, saida):
+        """Linha do cursor (1 = topo), perguntada ao terminal (ESC [6n). None se ele não responder."""
+        if self.fd is None:
+            return None
+        saida.texto('\x1b[6n')
+        resposta, prazo = b'', time.monotonic() + 0.4
+        while time.monotonic() < prazo:
+            if select.select([self.fd], [], [], 0.05)[0]:
+                try:
+                    resposta += os.read(self.fd, 64)
+                except OSError:
+                    return None
+                m = re.search(rb'\x1b\[(\d+);(\d+)R', resposta)
+                if m:
+                    return int(m.group(1))
+        return None
+
+    def apertou(self):
+        if self.fd is None:
+            return False
+        try:
+            return bool(os.read(self.fd, 64))
+        except OSError:
+            return False
+
+    def fecha(self):
+        if self.fd is not None:
+            try:
+                if self.antes is not None:
+                    self.termios.tcsetattr(self.fd, self.termios.TCSANOW, self.antes)
+            except Exception:
+                pass
+            os.close(self.fd)
+        self.fd = self.antes = None
+
+
+class Gota:
+    __slots__ = ('c', 's', 'v', 'L', 'fim', 'revela', 'feita')
+
+    def __init__(self, c, s, v, L, fim, revela):
+        self.c, self.s, self.v, self.L, self.fim, self.revela, self.feita = c, s, v, L, fim, revela, False
+
+
+def estilos():
+    termo, cor = os.environ.get('TERM', ''), os.environ.get('COLORTERM', '')
+    c256, c8 = cores_da_chuva()
+    if '256' in termo or cor in ('truecolor', '24bit'):
+        cab, viv, mei, fim, txt = c256
+        return {'cabeca': '\x1b[0;1;38;5;%dm' % cab, 'vivo': '\x1b[0;1;38;5;%dm' % viv, 'meio': '\x1b[0;38;5;%dm' % mei,
+                'fim': '\x1b[0;38;5;%dm' % fim, 'texto': '\x1b[0;38;5;%dm' % txt, 'previa': '\x1b[0;38;5;244m'}
+    cab, viv, mei, fim, txt = c8
+    return {'cabeca': '\x1b[0;1;3%dm' % cab, 'vivo': '\x1b[0;1;3%dm' % viv, 'meio': '\x1b[0;3%dm' % mei,
+            'fim': '\x1b[0;2;3%dm' % fim, 'texto': '\x1b[0;3%dm' % txt, 'previa': '\x1b[0;2m'}
+
+
+def fator_tempo():
+    try:
+        return min(10.0, max(0.1, float(os.environ.get('MATRIX_TEMPO', '1').replace(',', '.'))))
+    except ValueError:
+        return 1.0
+
+
+def passa_direto():
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    saida = Saida(1)
+    while True:
+        try:
+            bloco = os.read(0, 65536)
+        except KeyboardInterrupt:
+            return 130
+        if not bloco:
+            return 0
+        saida.bytes(bloco)
+
+
+def previa(cauda, espaco):
+    """Última linha recebida, limpa e cortada para caber na linha de espera."""
+    texto = ESC2.sub('', CORDA.sub('', OSC.sub('', CSI.sub('', cauda.decode('utf-8', 'replace')))))
+    linhas = [l.strip() for l in texto.replace('\r', '\n').split('\n') if l.strip()]
+    s, usado = [], 0
+    for ch in (linhas[-1] if linhas else ''):
+        if ch < ' ' or '\x7f' <= ch <= '\x9f':
+            continue
+        w = largura(ch)
+        if usado + w > espaco:
+            break
+        s.append(ch)
+        usado += w
+    return ''.join(s)
+
+
+class Espera:
+    """Linha de espera enquanto o comando roda (só depois de chegar algo): gotas, linhas recebidas e a última."""
+
+    def __init__(self, saida, cor):
+        self.saida, self.cor = saida, cor
+        self.t0 = time.monotonic()
+        self.prox, self.mostrou = self.t0 + 0.6, False
+        self.total = self.nlin = 0
+        self.cauda = b''
+
+    def chegou(self, bloco):
+        self.total += len(bloco)
+        self.nlin += bloco.count(b'\n')
+        self.cauda = (self.cauda + bloco)[-800:]
+
+    def desenha(self):
+        agora = time.monotonic()
+        if not self.total or agora < self.prox:
+            return
+        self.prox = agora + 0.1
+        try:
+            larg = os.get_terminal_size(self.saida.fd).columns
+        except OSError:
+            larg = 80
+        cor = self.cor
+        info = ' recebendo · %d linha%s · %d s ' % (self.nlin, '' if self.nlin == 1 else 's', agora - self.t0)
+        gotas = ''.join(random.choice((cor['vivo'], cor['meio'], cor['fim'])) + random.choice(SIMBOLOS)
+                        for _ in range(8))
+        resto = larg - 1 - 2 - 8 - len(info) - 2
+        p = previa(self.cauda, resto) if resto > 3 else ''
+        self.saida.texto('\r  ' + gotas + cor['texto'] + info + (cor['previa'] + '› ' + p if p else '')
+                         + '\x1b[0m\x1b[K')
+        self.mostrou = True
+
+    def limpa(self):
+        if self.mostrou:
+            self.saida.texto('\r\x1b[0m\x1b[K')
+            self.mostrou = False
+
+
+def ler_resultado(saida, estado, cor):
+    """Lê o resultado inteiro, mostrando a linha de espera enquanto o comando roda."""
+    pedacos, espera = [], Espera(saida, cor)
+    prazo = None
+    while True:
+        if estado['ctrl_c'] >= 2:
+            break
+        if estado['ctrl_c'] and prazo is None:
+            prazo = time.monotonic() + 1.5                # Ctrl+C: ainda pega o que o comando escrever ao sair
+        if prazo is not None and time.monotonic() > prazo:
+            break
+        if select.select([0], [], [], 0.1)[0]:
+            bloco = os.read(0, 65536)
+            if not bloco:
+                break
+            pedacos.append(bloco)
+            espera.chegou(bloco)
+        espera.desenha()
+    espera.limpa()
+    return b''.join(pedacos)
+
+
+def separa_cauda(dados, max_linhas):
+    """(começo, fim) com no máximo max_linhas linhas no fim; o começo termina em \\n."""
+    pos = len(dados) - 1 if dados.endswith(b'\n') else len(dados)
+    for _ in range(max_linhas):
+        j = dados.rfind(b'\n', 0, pos)
+        if j < 0:
+            return b'', dados
+        pos = j
+    return dados[:pos + 1], dados[pos + 1:]
+
+
+def chover(saida, teclado, texto_linhas, larg, alt, estado, cor, fator, col_final=None):
+    """Anima a região (as linhas do resultado) e deixa cada letra no lugar certo."""
+    N = len(texto_linhas)
+    saida.texto('\x1b[?25l')
+    # resultado curto: um pouco de chuva embaixo dele, só nas linhas livres (sem rolar a tela a mais)
+    lin_cursor = teclado.linha_do_cursor(saida) if N < 5 else None
+    extra = max(0, min(5 - N, alt - lin_cursor + 1 - N)) if lin_cursor else 0
+    NT = N + extra
+    alvo = [l + [None] * (larg - len(l)) for l in texto_linhas] + [[None] * larg for _ in range(extra)]
+
+    # tamanho do resultado -> tempo total e velocidade (mais linhas = chuva mais rápida)
+    T = min(2.4, 0.7 + 0.045 * NT) * fator
+    gotas = []
+
+    def nova_gota(c, s, fim, revela):
+        L = random.randint(max(2, NT // 4), max(3, min(14, NT // 2 + 2)))
+        v = (NT + L) / (0.5 * T) * random.uniform(0.8, 1.25)
+        gotas.append(Gota(c, s, v, L, fim, revela))
+
+    for c in range(larg):
+        fim = max((r for r in range(N) if alvo[r][c] is not None and alvo[r][c] is not CONT), default=-1)
+        if fim >= 0:
+            nova_gota(c, random.uniform(0, 0.35 * T), fim, True)
+    for _ in range(int(larg * 0.25 * min(1.0, NT / 8)) + 2):
+        nova_gota(random.randrange(larg), random.uniform(0, 0.6 * T), NT - 1, False)
+
+    estilo_chuva = (cor['fim'], cor['meio'], cor['vivo'], cor['cabeca'])
+    BRANCO = (' ', '')
+    mostrado, revelado, glifo = {}, {}, {}
+    transicao, dinamicas = set(), set()
+    cur = [0, 0]
+    sgr_atual = ['']
+
+    def ir(partes, r, c):
+        if cur[0] == r and cur[1] == c:
+            return
+        if r != cur[0]:
+            partes.append('\x1b[%d%s' % (abs(r - cur[0]), 'B' if r > cur[0] else 'A'))
+        partes.append('\r' + ('\x1b[%dC' % c if c else ''))
+        cur[0], cur[1] = r, c
+
+    def escreve(partes, r, c, ch, sg, w=1):
+        ir(partes, r, c)
+        if sg != sgr_atual[0]:
+            partes.append(sg or '\x1b[0m')
+            sgr_atual[0] = sg
+        partes.append(ch)
+        cur[1] = c + w
+
+    saida.texto('\n' * (NT - 1) + ('\x1b[%dA' % (NT - 1) if NT > 1 else '') + '\r\x1b[J')
+    try:
+        t0 = time.monotonic()
+        quadro = 1 / 40
+        while True:
+            t = time.monotonic() - t0
+            if estado['ctrl_c'] or estado['tela'] or teclado.apertou() or t > 3 * T + 1:
+                break
+            nivel = {}
+            for g in gotas:
+                if g.feita:
+                    continue
+                cab = (t - g.s) * g.v - 1.0               # linha da cabeça (entra na linha 0 quando cab >= 0)
+                if cab < 0:
+                    continue
+                topo = cab - g.L
+                if topo > g.fim:
+                    g.feita = True
+                    continue
+                for r in range(max(0, math.ceil(topo)), min(g.fim, int(cab)) + 1):
+                    a = alvo[r][g.c]
+                    pos = (r, g.c)
+                    if a is not None:                     # letra do resultado: a gota a revela, nunca a cobre
+                        if g.revela and a is not CONT and pos not in revelado:
+                            revelado[pos] = t
+                            transicao.add(pos)
+                        continue
+                    d = cab - r
+                    n = 3 if d < 1 else (2 if d < 0.3 * g.L else (1 if d < 0.65 * g.L else 0))
+                    if n > nivel.get(pos, -1):
+                        nivel[pos] = n
+            quer = {}
+            for pos, n in nivel.items():
+                ch = glifo.get(pos)
+                if ch is None or n == 3 or random.random() < 0.1:
+                    ch = glifo[pos] = random.choice(SIMBOLOS)
+                quer[pos] = (ch, estilo_chuva[n])
+            for pos in list(transicao):
+                idade = (t - revelado[pos]) / fator
+                ch, sg, w = alvo[pos[0]][pos[1]]
+                if idade < 0.05:
+                    quer[pos] = (random.choice(SIMBOLOS), cor['cabeca'])
+                elif idade < 0.15:
+                    quer[pos] = (ch, cor['cabeca'])
+                elif idade < 0.35:
+                    quer[pos] = (ch, cor['vivo'])
+                else:
+                    quer[pos] = (ch, sg)
+                    transicao.discard(pos)
+            for pos in dinamicas:
+                if pos not in quer:                       # a chuva passou: volta ao que fica
+                    a = alvo[pos[0]][pos[1]]
+                    quer[pos] = a[:2] if a is not None and a is not CONT and pos in revelado else BRANCO
+            dinamicas = set(nivel) | transicao
+            partes = []
+            for pos in sorted(quer):
+                novo = quer[pos]
+                if mostrado.get(pos, BRANCO) != novo:
+                    a = alvo[pos[0]][pos[1]]
+                    w = a[2] if a is not None and a is not CONT and novo[0] == a[0] else 1
+                    escreve(partes, pos[0], pos[1], novo[0], novo[1], w)
+                    mostrado[pos] = novo
+            if partes:
+                saida.texto(''.join(partes))
+            if not transicao and all(g.feita for g in gotas):
+                break
+            espera = quadro - (time.monotonic() - t0 - t)
+            if espera > 0:
+                time.sleep(espera)
+    finally:
+        # fim (ou tecla/Ctrl+C): cada linha do resultado reescrita inteira, já com as cores do comando
+        partes = []
+        for r, linha in enumerate(texto_linhas):
+            ir(partes, r, 0)
+            partes.append('\x1b[0m' + linha_pronta(linha) + ('\x1b[K' if len(linha) < larg else ''))
+            sgr_atual[0] = ''
+            cur[1] = larg
+        ultima = texto_linhas[-1]
+        if col_final is None:                             # terminou com quebra de linha: cursor na linha de baixo
+            ir(partes, N - 1, 0)
+            partes.append('\x1b[0m\n\x1b[J')
+        else:                                             # cursor onde o comando o deixou na última linha
+            if extra:
+                ir(partes, N, 0)
+                partes.append('\x1b[J')
+            if col_final < larg:
+                ir(partes, N - 1, col_final)
+            else:                                         # linha cheia: reescreve a última letra (cursor no fim dela)
+                k = larg - 2 if ultima[-1] is CONT else larg - 1
+                ir(partes, N - 1, k)
+                partes.append(linha_pronta(ultima[k:]))
+        partes.append('\x1b[0m\x1b[?25h')
+        saida.texto(''.join(partes))
+
+
+def revelar():
+    if not os.isatty(1):
+        return passa_direto()
+    try:
+        larg, alt = os.get_terminal_size(1)
+        primeiro_plano = os.tcgetpgrp(1) == os.getpgrp()
+    except OSError:
+        return passa_direto()
+    if os.environ.get('TERM', 'dumb') == 'dumb' or larg < 20 or alt < 6 or not primeiro_plano:
+        return passa_direto()
+
+    estado = {'ctrl_c': 0, 'tela': False}
+    signal.signal(signal.SIGINT, lambda *_: estado.__setitem__('ctrl_c', estado['ctrl_c'] + 1))
+    signal.signal(signal.SIGWINCH, lambda *_: estado.__setitem__('tela', True))
+    saida, cor, fator = Saida(1), estilos(), fator_tempo()
+    try:
+        dados = ler_resultado(saida, estado, cor)
+        codigo = 130 if estado['ctrl_c'] else 0
+        if not dados.strip() or estado['ctrl_c'] >= 2:
+            saida.bytes(dados)
+            return codigo
+        estado['ctrl_c'] = 0                              # 1 Ctrl+C parou o comando (ex.: ping): o resultado ainda chove
+        if estado['tela']:                                # janela mudou de tamanho enquanto esperava
+            estado['tela'] = False
+            larg, alt = os.get_terminal_size(1)
+            if larg < 20 or alt < 6:
+                saida.bytes(dados)
+                return codigo
+        comeco, fim = separa_cauda(dados, alt)
+        if len(fim) > 400000:                             # uma linha gigante (ex.: JSON numa linha só): sem chuva
+            saida.bytes(dados)
+            return codigo
+        texto = unicodedata.normalize('NFC', fim.decode('utf-8', 'replace'))
+        linhas, col_final = montar(texto, larg, alt)
+        if not linhas:                                    # só códigos de controle: o terminal faz o que eles mandam
+            saida.bytes(dados)
+            return codigo
+        regiao = linhas[-(alt - 1):]
+        antes = ''.join(linha_pronta(l) + '\n' for l in linhas[:len(linhas) - len(regiao)])
+        if comeco or antes:
+            saida.bytes(comeco)
+            saida.texto('\x1b[0m' + antes)
+        teclado = Teclado()
+        try:
+            chover(saida, teclado, regiao, larg, alt, estado, cor, fator, col_final)
+        finally:
+            teclado.fecha()
+        return codigo
+    except BrokenPipeError:
+        return 0
+    finally:
+        try:
+            saida.texto('\x1b[0m\x1b[?25h')
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------- chuva automática (matrix --capturar, pelo mascara.zsh)
+
+def grava(caminho, dados):
+    tmp = caminho + '.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        Saida(fd).bytes(dados)
+    finally:
+        os.close(fd)
+    os.replace(tmp, caminho)
+
+
+def capturar(base):
+    """Cria o terminal falso (pty) do comando, grava o caminho em BASE.pty e guarda tudo o que chegar.
+    Quando o zsh cria BASE.fim (o comando acabou), grava BASE.saida para a chuva. Se algum programa continuar
+    com o terminal falso (rodando em segundo plano ou parado com Ctrl+Z), o que ele escrever depois aparece
+    direto no terminal, como apareceria sem a chuva."""
+    import fcntl
+    import termios
+    for s in (signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP, signal.SIGTTOU, signal.SIGTTIN):
+        signal.signal(s, signal.SIG_IGN)                  # as teclas são para o comando, não para o ajudante
+    pai = os.getppid()
+    try:
+        mestre, escravo = os.openpty()
+    except OSError:
+        return 1
+
+    def copia_tamanho():
+        try:
+            tam = fcntl.ioctl(1, termios.TIOCGWINSZ, b'\0' * 8)
+            if fcntl.ioctl(escravo, termios.TIOCGWINSZ, b'\0' * 8) != tam:
+                fcntl.ioctl(escravo, termios.TIOCSWINSZ, tam)
+        except OSError:
+            pass
+
+    copia_tamanho()
+    grava(base + '.pty', os.ttyname(escravo).encode())
+    saida = Saida(1)
+    espera = Espera(saida, estilos())
+    dados, fim = [], base + '.fim'
+    prox_tamanho = time.monotonic() + 0.5
+    while not os.path.exists(fim):
+        if os.getppid() != pai:                           # o zsh fechou
+            return 0
+        if select.select([mestre], [], [], 0.05)[0]:
+            try:
+                bloco = os.read(mestre, 65536)
+            except OSError:
+                bloco = b''
+            if bloco:
+                dados.append(bloco)
+                espera.chegou(bloco)
+        espera.desenha()
+        if time.monotonic() > prox_tamanho:               # a janela mudou de tamanho: o comando vê o tamanho novo
+            copia_tamanho()
+            prox_tamanho = time.monotonic() + 0.5
+    os.close(escravo)
+    todos_fecharam = False
+    while select.select([mestre], [], [], 0.25)[0]:       # o que ainda estava no caminho
+        try:
+            bloco = os.read(mestre, 65536)
+        except OSError:                                   # ninguém mais usa o terminal falso
+            todos_fecharam = True
+            break
+        if not bloco:
+            todos_fecharam = True
+            break
+        dados.append(bloco)
+    espera.limpa()
+    grava(base + '.saida', b''.join(dados))
+    while not todos_fecharam and os.getppid() == pai:
+        if select.select([mestre], [], [], 1.0)[0]:
+            try:
+                bloco = os.read(mestre, 65536)
+            except OSError:
+                break
+            if not bloco:
+                break
+            saida.bytes(bloco)
+    return 0
+
+
+if __name__ == '__main__':
+    argumentos = sys.argv[1:]
+    if argumentos[:1] and argumentos[0] in ('-h', '--help', '--ajuda', 'ajuda'):
+        print(__doc__.strip())
+        sys.exit(0)
+    if len(argumentos) == 2 and argumentos[0] == '--capturar':
+        sys.exit(capturar(argumentos[1]))
+    if not sys.stdin.isatty():
+        sys.exit(revelar())
+    os.environ.setdefault('ESCDELAY', '25')
+    import curses  # noqa: E402
+    try:
+        curses.wrapper(principal)
+    except KeyboardInterrupt:
+        pass

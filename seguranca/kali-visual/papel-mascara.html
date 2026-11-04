@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>mascara</title>
+<!-- Papel de parede "Máscara verde" do Kali (desenho próprio, 1920x1080). Gerar o PNG com o Chrome sem janela:
+     chrome --headless=new --hide-scrollbars --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=kali-mascara-verde.png file:///.../papel-mascara.html
+     Mesmo desenho nas cores originais do Kali (para o "cores original"): ...papel-mascara.html#original -> kali-mascara-original.png
+     (máscara com as cores de verdade, como a do terminal, e chuva, anel e textos no azul do Kali).
+     Só a máscara (para a arte do terminal), 600x745: #mascara, #silhueta, #olhos, #tracos no fim do endereço. -->
+<style>
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#010402}
+#chuva,#cena{position:absolute;left:0;top:0}
+.so-mascara body{background:#000}
+.so-mascara #chuva,.so-mascara .extra{display:none}
+.tracos body{background:#fff}
+.tracos .pele{display:none}
+text{font-family:Consolas,"Cascadia Mono",monospace}
+</style></head>
+<body>
+<canvas id="chuva" width="1920" height="1080"></canvas>
+<svg id="cena" width="1920" height="1080" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <path id="contorno" d="M300,18 C440,18 548,96 560,250 C568,345 560,430 528,515 C494,614 420,702 336,740 Q300,754 264,740 C180,702 106,614 72,515 C40,430 32,345 40,250 C52,96 160,18 300,18 Z"/>
+  <clipPath id="rosto"><use href="#contorno"/></clipPath>
+  <radialGradient id="pele" cx="50%" cy="38%" r="62%">
+    <stop offset="0" stop-color="#f4f7ef"/>
+    <stop offset=".55" stop-color="#dde4d6"/>
+    <stop offset=".85" stop-color="#b3bfae"/>
+    <stop offset="1" stop-color="#7f8e7b"/>
+  </radialGradient>
+  <linearGradient id="lados" x1="0" x2="1">
+    <stop offset="0" stop-color="#0d1a10" stop-opacity=".6"/>
+    <stop offset=".24" stop-color="#0d1a10" stop-opacity="0"/>
+    <stop offset=".76" stop-color="#0d1a10" stop-opacity="0"/>
+    <stop offset="1" stop-color="#0d1a10" stop-opacity=".6"/>
+  </linearGradient>
+  <linearGradient id="queixo" x1="0" y1="0" x2="0" y2="1">
+    <stop offset=".62" stop-color="#0d1a10" stop-opacity="0"/>
+    <stop offset="1" stop-color="#0d1a10" stop-opacity=".5"/>
+  </linearGradient>
+  <radialGradient id="bochecha">
+    <stop offset="0" stop-color="#e2566e" stop-opacity=".55"/>
+    <stop offset=".6" stop-color="#e2566e" stop-opacity=".2"/>
+    <stop offset="1" stop-color="#e2566e" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="olhoLuz">
+    <stop offset="0" stop-color="#d8ffe2"/>
+    <stop offset=".4" stop-color="#2bff6e"/>
+    <stop offset="1" stop-color="#00501a"/>
+  </radialGradient>
+  <filter id="suave" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter>
+  <filter id="aura" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="26"/></filter>
+  <filter id="brilho" x="-20%" y="-80%" width="140%" height="260%">
+    <feGaussianBlur stdDeviation="5" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="brilhoOlho" x="-80%" y="-300%" width="260%" height="700%">
+    <feGaussianBlur stdDeviation="8" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="tingeVerde"><feColorMatrix type="matrix" values="0 0 0 0 .05  .25 .55 .2 0 .3  0 0 0 0 .12  0 0 0 1 0"/></filter>
+  <filter id="tingeVermelho"><feColorMatrix type="matrix" values=".45 .3 .2 0 .3  0 0 0 0 .02  0 0 0 0 .1  0 0 0 1 0"/></filter>
+  <pattern id="linhas" width="4" height="3" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#000" fill-opacity=".24"/></pattern>
+  <radialGradient id="vinheta" cx="50%" cy="45%" r="78%">
+    <stop offset=".42" stop-color="#000" stop-opacity="0"/>
+    <stop offset="1" stop-color="#000" stop-opacity=".9"/>
+  </radialGradient>
+  <radialGradient id="halo">
+    <stop offset="0" stop-color="#06200d" stop-opacity="1"/>
+    <stop offset=".55" stop-color="#021008" stop-opacity=".88"/>
+    <stop offset="1" stop-color="#000" stop-opacity="0"/>
+  </radialGradient>
+  <clipPath id="fatia1"><rect x="0" y="318" width="1920" height="9"/></clipPath>
+  <clipPath id="fatia2"><rect x="0" y="636" width="1920" height="3"/></clipPath>
+  <clipPath id="fatia3"><rect x="0" y="700" width="1920" height="4"/></clipPath>
+  <clipPath id="fatia4"><rect x="0" y="432" width="1920" height="3"/></clipPath>
+
+  <!-- máscara (coordenadas próprias 600 x 760) -->
+  <path id="olhoE" d="M144,305 C170,266 238,260 268,297 C240,286 176,289 144,305 Z"/>
+  <path id="sobE" d="M272,262 C250,214 222,178 186,168 C156,160 128,174 110,204 C136,188 164,186 192,198 C222,212 244,248 254,292 Z"/>
+  <path id="bigD" d="M300,452 C318,442 340,438 360,440 C384,442 410,448 428,440 C442,434 450,420 450,406 C450,396 444,390 436,391 C430,392 427,397 430,401 C434,404 437,410 435,418 C431,434 416,448 396,460 C374,473 348,482 328,482 C314,482 305,477 300,470 Z"/>
+  <g id="mascara">
+    <use class="pele" href="#contorno" fill="url(#pele)"/>
+    <g class="pele" clip-path="url(#rosto)">
+      <rect width="600" height="760" fill="url(#lados)"/>
+      <rect width="600" height="760" fill="url(#queixo)"/>
+      <ellipse cx="300" cy="115" rx="165" ry="72" fill="#fff" opacity=".4" filter="url(#suave)"/>
+      <ellipse cx="205" cy="290" rx="92" ry="44" fill="#1b2a1e" opacity=".24" filter="url(#suave)"/>
+      <ellipse cx="395" cy="290" rx="92" ry="44" fill="#1b2a1e" opacity=".24" filter="url(#suave)"/>
+      <circle cx="176" cy="408" r="66" fill="url(#bochecha)"/>
+      <circle cx="424" cy="408" r="66" fill="url(#bochecha)"/>
+      <ellipse cx="190" cy="372" rx="42" ry="20" fill="#fff" opacity=".3" filter="url(#suave)"/>
+      <ellipse cx="410" cy="372" rx="42" ry="20" fill="#fff" opacity=".3" filter="url(#suave)"/>
+      <path d="M286,298 C282,350 278,392 266,420" stroke="#1b2a1e" stroke-width="6" fill="none" opacity=".25" filter="url(#suave)"/>
+      <path d="M314,298 C318,350 322,392 334,420" stroke="#1b2a1e" stroke-width="6" fill="none" opacity=".25" filter="url(#suave)"/>
+      <ellipse cx="300" cy="404" rx="22" ry="15" fill="#fff" opacity=".4" filter="url(#suave)"/>
+      <path d="M240,436 C224,476 232,518 260,546" stroke="#1b2a1e" stroke-width="5" fill="none" opacity=".32" filter="url(#suave)"/>
+      <path d="M360,436 C376,476 368,518 340,546" stroke="#1b2a1e" stroke-width="5" fill="none" opacity=".32" filter="url(#suave)"/>
+      <path d="M150,322 C186,336 232,334 264,314" stroke="#1b2a1e" stroke-width="4" fill="none" opacity=".18" filter="url(#suave)"/>
+      <path d="M450,322 C414,336 368,334 336,314" stroke="#1b2a1e" stroke-width="4" fill="none" opacity=".18" filter="url(#suave)"/>
+    </g>
+    <use class="pele" href="#contorno" fill="none" stroke="#56684f" stroke-width="2.5"/>
+    <path class="pele" d="M272,424 C278,436 290,439 297,433 M328,424 C322,436 310,439 303,433" stroke="#435043" stroke-width="3" fill="none" stroke-linecap="round" opacity=".6"/>
+    <use class="pele" href="#olhoE" fill="#020503"/>
+    <use class="pele" href="#olhoE" fill="#020503" transform="translate(600,0) scale(-1,1)"/>
+    <use href="#sobE" fill="#0a0c0a"/>
+    <use href="#sobE" fill="#0a0c0a" transform="translate(600,0) scale(-1,1)"/>
+    <use href="#bigD" fill="#0a0c0a"/>
+    <use href="#bigD" fill="#0a0c0a" transform="translate(600,0) scale(-1,1)"/>
+    <path d="M236,492 C266,516 334,516 364,492" stroke="#253025" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+    <path d="M236,492 l-6,-7 M364,492 l6,-7" stroke="#253025" stroke-width="2.6" fill="none" stroke-linecap="round" opacity=".8"/>
+    <ellipse class="pele" cx="300" cy="522" rx="34" ry="7" fill="#1b2a1e" opacity=".18" filter="url(#suave)"/>
+    <path d="M293,522 C295,582 297,652 300,718 C303,652 305,582 307,522 C303,517 297,517 293,522 Z" fill="#0a0c0a"/>
+  </g>
+  <g id="olhosAcesos">
+    <use href="#olhoE" fill="url(#olhoLuz)" filter="url(#brilhoOlho)" opacity=".9"/>
+    <use href="#olhoE" fill="url(#olhoLuz)" filter="url(#brilhoOlho)" opacity=".9" transform="translate(600,0) scale(-1,1)"/>
+  </g>
+</defs>
+
+<rect class="extra" width="1920" height="1080" fill="url(#vinheta)"/>
+<ellipse class="extra" cx="960" cy="482" rx="560" ry="500" fill="url(#halo)"/>
+<linearGradient id="rodape" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-opacity="0"/><stop offset=".3" stop-opacity=".78"/><stop offset="1" stop-opacity=".94"/></linearGradient>
+<rect class="extra" y="850" width="1920" height="230" fill="url(#rodape)"/>
+<g class="extra" fill="#000" opacity=".8" filter="url(#suave)">
+  <rect x="1228" y="176" width="166" height="48"/><rect x="1370" y="458" width="134" height="48"/>
+  <rect x="386" y="458" width="162" height="48"/><rect x="508" y="770" width="186" height="26"/>
+</g>
+
+<!-- anel de mira -->
+<g class="extra" fill="none" stroke="#2bff6e">
+  <circle cx="960" cy="482" r="378" stroke-width="1.2" opacity=".28"/>
+  <circle cx="960" cy="482" r="396" stroke-width="7" stroke-dasharray="1.5 11" opacity=".22"/>
+  <circle cx="960" cy="482" r="378" stroke-width="3" stroke-dasharray="150 443.8" stroke-dashoffset="-40" opacity=".75" filter="url(#brilho)"/>
+  <circle cx="960" cy="482" r="412" stroke-width="1" stroke-dasharray="60 160 20 400" opacity=".4"/>
+  <path d="M960,74 v22 M960,868 v22 M552,482 h22 M1346,482 h22" stroke-width="2" opacity=".6"/>
+</g>
+<g class="extra" fill="#3dff7a" font-size="15" opacity=".62">
+  <text x="1238" y="196">ID: DESCONHECIDO</text>
+  <text x="1238" y="216" opacity=".6">CLASSE: FANTASMA</text>
+  <text x="1380" y="478">51°29'57.6"N</text>
+  <text x="1380" y="498" opacity=".6">0°07'29.5"W</text>
+  <text x="540" y="478" text-anchor="end">05.11.1605</text>
+  <text x="540" y="498" text-anchor="end" opacity=".6">PÓLVORA // TRAIÇÃO</text>
+  <text x="684" y="790" text-anchor="end">SINAL: CRIPTOGRAFADO</text>
+</g>
+
+<!-- máscara -->
+<g id="palco" transform="translate(720,176) scale(.8)">
+  <use class="extra" href="#contorno" fill="#1aff5c" opacity=".32" filter="url(#aura)"/>
+  <use id="usoMascara" href="#mascara"/>
+  <use class="extra" href="#olhosAcesos"/>
+  <use id="silh" href="#contorno" fill="#fff" style="display:none"/>
+  <g id="soOlhos" style="display:none" fill="#fff"><use href="#olhoE"/><use href="#olhoE" transform="translate(600,0) scale(-1,1)"/></g>
+</g>
+
+<!-- falhas de sinal -->
+<g class="extra">
+  <g clip-path="url(#fatia1)"><g transform="translate(740,176) scale(.8)"><use href="#mascara" filter="url(#tingeVerde)"/></g></g>
+  <g clip-path="url(#fatia2)" opacity=".6"><g transform="translate(706,176) scale(.8)"><use href="#mascara" filter="url(#tingeVermelho)"/></g></g>
+  <g clip-path="url(#fatia3)"><g transform="translate(748,176) scale(.8)"><use href="#mascara" filter="url(#tingeVerde)"/></g></g>
+  <g clip-path="url(#fatia4)"><g transform="translate(730,176) scale(.8)"><use href="#mascara" filter="url(#tingeVerde)"/></g></g>
+  <rect x="640" y="704" width="640" height="1" fill="#3dff7a" opacity=".35"/>
+  <rect x="700" y="327" width="520" height="1" fill="#3dff7a" opacity=".25"/>
+</g>
+
+<!-- textos -->
+<g class="extra" text-anchor="middle">
+  <text x="960" y="936" font-size="31" letter-spacing="7" fill="#8dffb0" filter="url(#brilho)">REMEMBER, REMEMBER THE FIFTH OF NOVEMBER</text>
+  <text x="960" y="980" font-size="19" letter-spacing="2" fill="#2bd462" opacity=".85">ideias não morrem   //   conhecimento é livre   //   hackeie com ética</text>
+  <text x="960" y="1052" font-size="16" fill="#1f7a3c" opacity=".8">root@kali:~# <tspan fill="#3dff7a">█</tspan></text>
+</g>
+<g class="extra" font-size="14" fill="#2bd462" opacity=".55">
+  <text x="40" y="958">[*] carregando protocolo 05.11 ...</text>
+  <text x="40" y="978">[+] máscara ............ OK</text>
+  <text x="40" y="998">[+] identidade ......... DESCONHECIDA</text>
+  <text x="40" y="1018">[+] canal .............. CRIPTOGRAFADO</text>
+  <text x="40" y="1038" fill="#3dff7a">[!] somos muitos_</text>
+</g>
+<g class="extra" font-size="14" fill="#2bd462" opacity=".5" text-anchor="end">
+  <text x="1880" y="958">KALI // NÓ 05.11</text>
+  <text x="1880" y="978">0x56 0x20 0x44 0x45 0x20 0x56</text>
+  <text x="1880" y="998">01010110 00100000 01010110</text>
+  <text x="1880" y="1018">uptime: 421 anos</text>
+</g>
+<rect class="extra" width="1920" height="1080" fill="url(#linhas)"/>
+</svg>
+<script>
+(function(){
+  if (location.hash === '#mascara' || location.hash === '#silhueta' || location.hash === '#olhos' || location.hash === '#tracos') {
+    document.documentElement.classList.add('so-mascara');
+    if (location.hash === '#tracos') { document.documentElement.classList.add('tracos'); document.querySelectorAll('.pele').forEach(function (e) { e.remove(); }); }
+    else if (location.hash !== '#mascara') {
+      document.getElementById('usoMascara').style.display = 'none';
+      document.getElementById(location.hash === '#silhueta' ? 'silh' : 'soOlhos').style.display = '';
+    }
+    var s = document.getElementById('cena');
+    s.setAttribute('viewBox', '712 176 496 616');
+    s.setAttribute('width', '600'); s.setAttribute('height', '745');
+    return;
+  }
+  // #original: as mesmas peças nas cores originais do Kali (troca cor por cor; o desenho não muda)
+  var original = location.hash === '#original';
+  if (original) {
+    var troca = {
+      '#010402': '#07090e',                                                  // fundo
+      '#f4f7ef': '#f8f3e8', '#dde4d6': '#e8dfcd', '#b3bfae': '#c9bca5', '#7f8e7b': '#8d7f6b',   // porcelana
+      '#0d1a10': '#1f1812', '#1b2a1e': '#2e241c', '#56684f': '#6e6150', '#435043': '#5a4c3e',   // sombras
+      '#253025': '#7d2733', '#020503': '#120e0c', '#0a0c0a': '#0c0a09',     // lábios vinho, olhos e bigode
+      '#06200d': '#0b1a33', '#021008': '#050b18', '#1aff5c': '#367bf0',     // halo e aura
+      '#2bff6e': '#4a9cff', '#3dff7a': '#5fa8ff', '#8dffb0': '#e8f0ff', '#2bd462': '#4a8fe6', '#1f7a3c': '#2c5aa0'
+    };
+    document.querySelectorAll('[fill],[stroke],[stop-color]').forEach(function (e) {
+      ['fill', 'stroke', 'stop-color'].forEach(function (a) {
+        var v = (e.getAttribute(a) || '').toLowerCase();
+        if (troca[v]) e.setAttribute(a, troca[v]);
+      });
+    });
+    document.querySelector('#tingeVerde feColorMatrix').setAttribute('values', '0 0 0 0 .08  0 0 0 0 .22  .25 .55 .2 0 .45  0 0 0 1 0');
+    document.querySelectorAll('use[href="#olhosAcesos"]').forEach(function (e) { e.remove(); });   // olhos escuros, sem brilho
+    document.documentElement.style.background = document.body.style.background = '#07090e';
+  }
+  var cor = original
+    ? {fundo: '#07090e', solto: 'rgba(74,140,255,', brilho: '#5fa8ff', cabeca: 'rgba(225,238,255,',
+       rastro: function (f, a) { return 'rgba(54,' + (110 + Math.floor(70 * f)) + ',240,' + a + ')'; }}
+    : {fundo: '#010402', solto: 'rgba(40,255,110,', brilho: '#3dff7a', cabeca: 'rgba(215,255,228,',
+       rastro: function (f, a) { return 'rgba(36,' + (180 + Math.floor(75 * f)) + ',96,' + a + ')'; }};
+  function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  var R = rng(1105);
+  var c = document.getElementById('chuva').getContext('2d');
+  c.fillStyle = cor.fundo; c.fillRect(0, 0, 1920, 1080);
+  var sim = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789ABCDEF:=+*<>';
+  function ch(){ return sim[Math.floor(R()*sim.length)]; }
+  function camada(tam, passo, forca, quedas){
+    c.font = tam + 'px "MS Gothic", Consolas, monospace';
+    c.textBaseline = 'top';
+    var cols = Math.ceil(1920/passo), lins = Math.ceil(1080/(tam+2));
+    for (var x = 0; x < cols; x++) {
+      for (var y = 0; y < lins; y++) if (R() < .06) { c.fillStyle = cor.solto + (.03*forca) + ')'; c.fillText(ch(), x*passo, y*(tam+2)); }
+      var n = R() < quedas ? (R() < .35 ? 2 : 1) : 0;
+      for (var k = 0; k < n; k++) {
+        var cab = Math.floor(R()*(lins+12)) - 4, L = 6 + Math.floor(R()*26), base = .45 + R()*.55;
+        for (var i = 0; i < L; i++) {
+          var lin = cab - i; if (lin < 0 || lin >= lins) continue;
+          var a = Math.pow(1 - i/L, 1.5) * base * forca;
+          if (i === 0) { c.shadowColor = cor.brilho; c.shadowBlur = 10; c.fillStyle = cor.cabeca + Math.min(1, forca*1.1) + ')'; }
+          else { c.shadowBlur = 0; c.fillStyle = cor.rastro(1 - i/L, a); }
+          c.fillText(ch(), x*passo, lin*(tam+2));
+        }
+        c.shadowBlur = 0;
+      }
+    }
+  }
+  camada(13, 15, .45, .55);
+  camada(19, 24, .9, .5);
+})();
+</script>
+</body></html>

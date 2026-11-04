@@ -1,0 +1,16 @@
+* text=auto
+# Scripts do Windows: o cmd.exe pode se perder com quebra de linha só LF.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+# Ferramentas de segurança: guardar byte a byte, para o SHA256 bater com o do pendrive.
+seguranca/*.ps1 -text
+*.txt text eol=crlf
+# Vão para o Kali (Linux): só LF. Com \r no fim da linha o bash e o zsh quebram e as senhas das wordlists não batem.
+*.sh text eol=lf
+*.zsh text eol=lf
+*.rules text eol=lf
+*.colorscheme text eol=lf
+seguranca/kali-visual/matrix text eol=lf
+labs/**/*.txt text eol=lf
+# Artes do terminal (códigos de cor): byte a byte; com \r no fim da linha o desenho sai torto.
+*.ans -text

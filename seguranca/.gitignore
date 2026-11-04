@@ -1,0 +1,5 @@
+relatorios/
+# Pacotes e capturas do Wireshark podem levar relatórios e dados do PC
+*.zip
+*.pcap
+*.pcapng
